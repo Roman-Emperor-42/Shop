@@ -45,7 +45,6 @@ public class Display extends AbstractDisplay {
         ItemEntity entityItem = new ItemEntity(serverLevel, location.getX(), location.getY(), location.getZ(), itemStack);
         int entityID = entityItem.getId();
         this.addEntityID(player, entityID);
-        entityItem.setInvulnerable(true);
         entityItem.setRemainingFireTicks(-1);
         entityItem.setNoGravity(true);
         entityItem.persist = true;
@@ -100,7 +99,6 @@ public class Display extends AbstractDisplay {
         }
         armorStand.setMarker(true);
         armorStand.setNoGravity(true);
-        armorStand.setInvulnerable(true);
         armorStand.setInvisible(true);
         armorStand.persist = true;
         armorStand.collides = false;
