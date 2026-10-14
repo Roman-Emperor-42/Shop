@@ -21,6 +21,7 @@ import org.bukkit.persistence.PersistentDataType;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 public class ShopGuiHandler {
@@ -50,6 +51,8 @@ public class ShopGuiHandler {
     private HashMap<GuiTitle, String> guiWindowTitles = new HashMap<>();
 
     private HashMap<UUID, ItemStack> playerHeads = new HashMap<>();
+    // Owners whose head needs (re)building, with their latest shop. Filled from async shop loading.
+    private Map<UUID, AbstractShop> staleHeads = new ConcurrentHashMap<>();
 
     public ShopGuiHandler(Shop instance){
         plugin = instance;
@@ -77,10 +80,24 @@ public class ShopGuiHandler {
         player.closeInventory();
     }
 
+    /**
+     * Marks the owner's GUI head for rebuilding the next time it is shown.
+     * Heads are built lazily: each setItemMeta on a head without textures makes Paper send an uncached
+     * Mojang profile lookup, so building one per loaded shop floods the session server at startup.
+     */
     public void reloadPlayerHeadIcon(AbstractShop shop){
         if(shop == null || shop.getOwnerUUID() == null)
             return;
+        staleHeads.put(shop.getOwnerUUID(), shop);
+    }
 
+    private void buildStaleHead(UUID playerUUID){
+        AbstractShop shop = staleHeads.remove(playerUUID);
+        if(shop != null)
+            buildPlayerHeadIcon(shop);
+    }
+
+    private void buildPlayerHeadIcon(AbstractShop shop){
         UUID playerUUID = shop.getOwnerUUID();
         OfflinePlayer offlinePlayer = shop.getOwner();
         ItemStack playerHead = playerHeads.get(playerUUID);
@@ -137,12 +154,15 @@ public class ShopGuiHandler {
     }
 
     public ItemStack getPlayerHeadIcon(UUID playerUUID){
+        buildStaleHead(playerUUID);
         if(playerHeads.containsKey(playerUUID))
             return playerHeads.get(playerUUID);
         return new ItemStack(Material.AIR);
     }
 
     public ArrayList<ItemStack> getShopOwnerHeads(){
+        for(UUID playerUUID : new ArrayList<>(staleHeads.keySet()))
+            buildStaleHead(playerUUID);
         return playerHeads.values().stream().collect(
                 Collectors.toCollection(ArrayList::new)
         );
