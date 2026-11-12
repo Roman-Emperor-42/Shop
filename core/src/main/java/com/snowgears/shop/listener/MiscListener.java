@@ -34,13 +34,14 @@ import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 
 public class MiscListener implements Listener {
 
     public Shop plugin;
-    private HashMap<UUID, ShopCreationProcess> playerChatCreationSteps = new HashMap<>();
-    private HashMap<UUID, Long> lastChatCreation = new HashMap<>();
+    private ConcurrentHashMap<UUID, ShopCreationProcess> playerChatCreationSteps = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<UUID, Long> lastChatCreation = new ConcurrentHashMap<>();
 
     public MiscListener(Shop instance) {
         plugin = instance;
@@ -155,7 +156,7 @@ public class MiscListener implements Listener {
                 }
 
                 //give player a limited amount of time to finish creating the shop until it is deleted
-                plugin.getFoliaLib().getScheduler().runLater(() -> {
+                plugin.getFoliaLib().getScheduler().runAtLocationLater(b.getLocation(), () -> {
                     //the shop has still not been initialized with an item from a player
                     if (!shop.isInitialized()) {
                         shop.delete();
@@ -194,10 +195,8 @@ public class MiscListener implements Listener {
 
         // Remove player from creative selection if they are in it!
         // The Bukkit API can only change player game modes in a sync task, not an async task
-        plugin.getServer().getScheduler().scheduleSyncDelayedTask(plugin, new Runnable() {
-            public void run() {
-                plugin.getCreativeSelectionListener().removePlayerFromCreativeSelection(player);
-            }
+        plugin.getFoliaLib().getScheduler().runAtEntityLater(player, () -> {
+            plugin.getCreativeSelectionListener().removePlayerFromCreativeSelection(player);
         }, 1);
     }
 
@@ -372,7 +371,7 @@ public class MiscListener implements Listener {
 
                 //give player a limited amount of time to finish creating the shop until it is deleted
                 final UUID originalProcessUUID = process.getUniqueID();
-                plugin.getFoliaLib().getScheduler().runLater(() -> {
+                plugin.getFoliaLib().getScheduler().runAtEntityLater(player, () -> {
                     //the shop has still not been initialized with an item from a player
                     ShopCreationProcess currentProcess = playerChatCreationSteps.get(player.getUniqueId());
                     if (currentProcess != null && currentProcess.getUniqueID().equals(originalProcessUUID)) {

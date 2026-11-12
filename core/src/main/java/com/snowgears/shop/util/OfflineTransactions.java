@@ -15,7 +15,7 @@ public class OfflineTransactions {
 
     private UUID playerUUID;
     private long lastPlayed;
-    private boolean isCalculating;
+    private volatile boolean isCalculating; // written by the async db task, polled on login
     private int numTransactions;
     private double totalProfit;
     private double totalSpent;

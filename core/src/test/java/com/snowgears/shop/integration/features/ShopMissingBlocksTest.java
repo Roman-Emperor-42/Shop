@@ -109,7 +109,7 @@ public class ShopMissingBlocksTest extends BaseMockBukkitTest {
     }
 
     @Test
-    void load_catchesException_andDeletes() throws Exception {
+    void load_catchesException_andKeepsShop() throws Exception {
         ServerMock server = getServer();
         World world = server.addSimpleWorld("world");
         PlayerMock player = server.addPlayer();
@@ -127,7 +127,7 @@ public class ShopMissingBlocksTest extends BaseMockBukkitTest {
 
         boolean loaded = shop.load();
         assertFalse(loaded, "Shop.load() should catch unexpected exceptions and return false");
-        assertNull(getPlugin().getShopHandler().getShop(originalSignLoc), "No shop should be registered at the sign location when creation fails");
+        assertNotNull(getPlugin().getShopHandler().getShop(originalSignLoc), "An unexpected load error must not delete the shop");
     }
 
     @Test

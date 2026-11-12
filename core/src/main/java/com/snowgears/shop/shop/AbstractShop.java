@@ -137,9 +137,9 @@ public abstract class AbstractShop {
             isLoaded = true;
             return true;
         } catch (Error | Exception error) {
-            //this shop has no sign on it. return false
-            Shop.getPlugin().getLogger().warning("Unknown error while attempting to load Shop sign and/or chest! Deleting shop: " + this);
-            this.delete();
+            // Not proof the shop is broken (e.g. a wrong-thread block read on Folia), so keep it; only the checks above delete
+            Shop.getPlugin().getLogger().warning("Unknown error while attempting to load Shop sign and/or chest, skipping load: " + this + " (" + error + ")");
+            Shop.getPlugin().getLogger().debug("Full stack trace for shop load error: ", error);
             return false;
         }
     }
@@ -578,18 +578,20 @@ public abstract class AbstractShop {
         if(player == null)
             return;
 
-        if(chestLocation == null) {
-            this.load();
-            Location loc = this.getSignLocation().getBlock().getRelative(BlockFace.UP).getLocation().add(0.5, 0, 0.5);
+        // load() reads blocks, which on Folia must happen on the shop's region thread, not the player's
+        Shop.getPlugin().getFoliaLib().getScheduler().runAtLocation(signLocation, task -> {
+            Location loc;
+            if(chestLocation == null) {
+                this.load();
+                loc = this.getSignLocation().getBlock().getRelative(BlockFace.UP).getLocation().add(0.5, 0, 0.5);
+            }
+            else {
+                loc = this.getSignLocation().getBlock().getRelative(facing).getLocation().add(0.5, 0, 0.5);
+                loc.setYaw(UtilMethods.faceToYaw(facing.getOppositeFace()));
+                loc.setPitch(25.0f);
+            }
             Shop.getPlugin().getFoliaLib().getScheduler().teleportAsync(player, loc);
-        }
-        else {
-            Location loc = this.getSignLocation().getBlock().getRelative(facing).getLocation().add(0.5, 0, 0.5);
-            loc.setYaw(UtilMethods.faceToYaw(facing.getOppositeFace()));
-            loc.setPitch(25.0f);
-
-            Shop.getPlugin().getFoliaLib().getScheduler().teleportAsync(player, loc);
-        }
+        });
         Shop.getPlugin().getShopListener().addTeleportCooldown(player);
     }
 

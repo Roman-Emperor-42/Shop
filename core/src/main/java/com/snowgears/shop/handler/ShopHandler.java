@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 import java.nio.file.Files;
@@ -45,8 +46,8 @@ public class ShopHandler {
     private Class<?> displayClass;
 
     private ConcurrentHashMap<Location, AbstractShop> allShops = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<UUID, List<Location>> playerShops = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<String, List<Location>> chunkShops = new ConcurrentHashMap<>(); //String key = world_x_z
+    private ConcurrentHashMap<UUID, CopyOnWriteArrayList<Location>> playerShops = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<String, CopyOnWriteArrayList<Location>> chunkShops = new ConcurrentHashMap<>(); //String key = world_x_z
     private ConcurrentHashMap<UUID, HashSet<Location>> playersWithActiveShopDisplays = new ConcurrentHashMap<>();
     private Set<UUID> playersProcessingShopDisplays = ConcurrentHashMap.newKeySet();
     private ConcurrentHashMap<UUID, Location> playersActiveShopDisplayTag = new ConcurrentHashMap<>();
@@ -54,7 +55,7 @@ public class ShopHandler {
     //all loading of shops happens async at onEnable()
     //shops that still need to calculate their facing direction based on sign are considered "unloaded"
     //we will be loading these shops at time of chunkload and resaving them so they are saved with the 'facing' variable
-    private ConcurrentHashMap<String, List<Location>> unloadedShopsByChunk = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<String, CopyOnWriteArrayList<Location>> unloadedShopsByChunk = new ConcurrentHashMap<>();
     private UUID adminUUID;
     private BlockFace[] directions = {BlockFace.NORTH, BlockFace.EAST, BlockFace.SOUTH, BlockFace.WEST};
 
@@ -240,24 +241,15 @@ public class ShopHandler {
     public void addShop(AbstractShop shop) {
 
         //this is to remove a bug that caused one shop to be saved to multiple files at one point
-        AbstractShop s = getShop(shop.getSignLocation());
-        if(s != null) {
+        if(allShops.putIfAbsent(shop.getSignLocation(), shop) != null) {
             return;
         }
-        allShops.put(shop.getSignLocation(), shop);
 
-        List<Location> playerShopLocations = getShopLocations(shop.getOwnerUUID());
-        if(!playerShopLocations.contains(shop.getSignLocation())) {
-            playerShopLocations.add(shop.getSignLocation());
-            playerShops.put(shop.getOwnerUUID(), playerShopLocations);
-        }
+        // Shops are added from many region threads at once on Folia, so every list update must be atomic
+        playerShops.computeIfAbsent(shop.getOwnerUUID(), k -> new CopyOnWriteArrayList<>()).addIfAbsent(shop.getSignLocation());
 
         String chunkKey = UtilMethods.getChunkKey(shop.getSignLocation());
-        List<Location> chunkShopLocations = getShopLocations(chunkKey);
-        if(!chunkShopLocations.contains(shop.getSignLocation())) {
-            chunkShopLocations.add(shop.getSignLocation());
-            chunkShops.put(chunkKey, chunkShopLocations);
-        }
+        chunkShops.computeIfAbsent(chunkKey, k -> new CopyOnWriteArrayList<>()).addIfAbsent(shop.getSignLocation());
 
         plugin.getGuiHandler().reloadPlayerHeadIcon(shop);
     }
@@ -265,34 +257,14 @@ public class ShopHandler {
     //This method should only be used by AbstractShop object to delete
     public void removeShop(AbstractShop shop, boolean forceSave) {
         boolean changed = false;
-        if (allShops.containsKey(shop.getSignLocation())) {
-            allShops.remove(shop.getSignLocation());
+        if (allShops.remove(shop.getSignLocation()) != null) {
             changed = true;
         }
-        if(playerShops.containsKey(shop.getOwnerUUID())){
-            List<Location> playerShopLocations = getShopLocations(shop.getOwnerUUID());
-            if(playerShopLocations.contains(shop.getSignLocation())) {
-                playerShopLocations.remove(shop.getSignLocation());
-                if (playerShopLocations.isEmpty()) {
-                    playerShops.remove(shop.getOwnerUUID());
-                } else {
-                    playerShops.put(shop.getOwnerUUID(), playerShopLocations);
-                }
-                changed = true;
-            }
+        if (removeLocation(playerShops, shop.getOwnerUUID(), shop.getSignLocation())) {
+            changed = true;
         }
-        String chunkKey = UtilMethods.getChunkKey(shop.getSignLocation());
-        if(chunkShops.containsKey(chunkKey)){
-            List<Location> chunkShopLocations = getShopLocations(chunkKey);
-            if(chunkShopLocations.contains(shop.getSignLocation())) {
-                chunkShopLocations.remove(shop.getSignLocation());
-                if (chunkShopLocations.isEmpty()) {
-                    chunkShops.remove(chunkKey);
-                } else {
-                    chunkShops.put(chunkKey, chunkShopLocations);
-                }
-                changed = true;
-            }
+        if (removeLocation(chunkShops, UtilMethods.getChunkKey(shop.getSignLocation()), shop.getSignLocation())) {
+            changed = true;
         }
 
 
@@ -306,6 +278,16 @@ public class ShopHandler {
                 this.saveShops(shop.getOwnerUUID(), true);
             }
         }
+    }
+
+    // Atomically removes the location and drops the list once empty, so a concurrent add cannot be lost
+    private static <K> boolean removeLocation(ConcurrentHashMap<K, CopyOnWriteArrayList<Location>> map, K key, Location location) {
+        boolean[] removed = {false};
+        map.computeIfPresent(key, (k, locations) -> {
+            removed[0] = locations.remove(location);
+            return locations.isEmpty() ? null : locations;
+        });
+        return removed[0];
     }
 
     public void processUnloadedShopsInChunk(Chunk chunk){
@@ -333,11 +315,7 @@ public class ShopHandler {
 
     public void addUnloadedShopToChunkList(AbstractShop shop){
         String chunkKey = UtilMethods.getChunkKey(shop.getSignLocation());
-        List<Location> shopLocations = getUnloadedShopsByChunk(chunkKey);
-        if(!shopLocations.contains(shop.getSignLocation())) {
-            shopLocations.add(shop.getSignLocation());
-            unloadedShopsByChunk.put(chunkKey, shopLocations);
-        }
+        unloadedShopsByChunk.computeIfAbsent(chunkKey, k -> new CopyOnWriteArrayList<>()).addIfAbsent(shop.getSignLocation());
     }
 
     public List<AbstractShop> getAllShops(){
