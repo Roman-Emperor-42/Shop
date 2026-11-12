@@ -200,6 +200,12 @@ public class Shop extends JavaPlugin {
     public void onEnable() {
         plugin = this;
 
+        // Load every class in our jar now. Bukkit loads plugin classes lazily from the jar on disk,
+        // so if Shop-x.y.z.jar is replaced while the server is running, classes that have not been
+        // used yet (e.g. PricePair, first needed when a shop sign is written) throw
+        // NoClassDefFoundError. Pulling them all in up front makes a jar swap harmless until restart.
+        ClassPreloader.preload(this, getFile(), getClassLoader());
+
         // Initialize FoliaLib
         foliaLib = new FoliaLib(this);
 
